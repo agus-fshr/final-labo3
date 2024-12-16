@@ -120,9 +120,9 @@ void app_main(void)
             //  Process audio data
             
             // Reverb
-            uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
-            echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
-            data_out = echo_buffer[delay_index]/2;
+            // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
+            // echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
+            // data_out = echo_buffer[delay_index]/2;
 
             // Echo
             // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : ((delay_index + 1) % (DELAY_BUFFER_SIZE / 2));
@@ -133,22 +133,22 @@ void app_main(void)
             // data_out *= 2;
 
             // Tremolo
-            // float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
-            // data_out *= lfo_value;
-            // tremolo_phase += TREMOLO_INCREMENT;
-            // if (tremolo_phase >= 2 * M_PI) {
-            //     tremolo_phase -= 2 * M_PI;
-            // }
+            float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
+            data_out *= lfo_value;
+            tremolo_phase += TREMOLO_INCREMENT;
+            if (tremolo_phase >= 2 * M_PI) {
+                tremolo_phase -= 2 * M_PI;
+            }
 
             // Downsample
             // if (delay_index % 2 == 0) {
-            //     data_out = past_samples[delay_index - 1];
+            //     data_out = past_samples[delay_index];
             // }
 
             // Bitcrusher
-            // if (data_out < 1000) {
-            //     data_out = 1000 + (1000 - data_out);
-            // } 
+            if (data_out < 1000) {
+                data_out = 1000 + (1000 - data_out);
+            } 
             
             // Downsample
             // if (delay_index % 2 == 0) {
@@ -161,9 +161,9 @@ void app_main(void)
             gpio_set_level(GPIO_NUM_33, 0);
             while ((esp_timer_get_time() - current_time) < (UPDATE_PERIOD_MICROSECONDS));
             // vTaskDelay(pdMS_TO_TICKS(UPDATE_PERIOD_MICROSECONDS / 1000));
-            dac_output_voltage(DAC_CHANNEL, (int) (data_out >>4 & 0x000000FF));
-            // int scaled_value = data_out / 1.5;
-            // dac_output_voltage(DAC_CHANNEL, scaled_value);
+            // dac_output_voltage(DAC_CHANNEL, (int) (data_out >>4 & 0x000000FF));
+            int scaled_value = data_out / 255 * 3;
+            dac_output_voltage(DAC_CHANNEL, scaled_value);
             current_time = esp_timer_get_time(); // Obtiene el tiempo actual en microsegundos
         } else if (ret == ESP_ERR_TIMEOUT) {
             //We try to read `EXAMPLE_READ_LEN` until API returns timeout, which means there's no available data
