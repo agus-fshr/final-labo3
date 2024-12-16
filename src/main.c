@@ -25,11 +25,12 @@
 
 
 #define DAC_CHANNEL DAC_CHAN_0
-#define BUTTON_EFFECT_1 GPIO_NUM_16
-#define BUTTON_EFFECT_2 GPIO_NUM_17
-#define BUTTON_EFFECT_3 GPIO_NUM_18
-#define BUTTON_EFFECT_4 GPIO_NUM_19
-#define BUTTON_EFFECT_5 GPIO_NUM_22
+#define REVERB_BUTTON GPIO_NUM_16
+#define ECHO_BUTTON GPIO_NUM_17
+#define DISTORTION_BUTTON GPIO_NUM_18
+#define TREMOLO_BUTTON GPIO_NUM_19
+#define RECTIFIED_TREMOLO GPIO_NUM_22
+#define CLEAN_BUTTON GPIO_NUM_23
 
 // Echo defines
 #define DELAY_BUFFER_SIZE 20000
@@ -66,6 +67,24 @@ static int delay_index = 0;
 // Tremolo
 float tremolo_phase = 0.0;
 
+void configure_gpio_pins(void) {
+    // Create a bitmask for all the buttons
+    uint64_t button_mask = (1ULL << REVERB_BUTTON) |
+                           (1ULL << ECHO_BUTTON) |
+                           (1ULL << DISTORTION_BUTTON) |
+                           (1ULL << TREMOLO_BUTTON) |
+                           (1ULL << RECTIFIED_TREMOLO);
+
+    // Configure GPIOs as input with pull-up resistors
+    gpio_config_t io_conf = {
+        .pin_bit_mask = button_mask,      // Select the buttons
+        .mode = GPIO_MODE_INPUT,          // Set as input mode
+        .pull_up_en = GPIO_PULLUP_ENABLE, // Enable pull-up resistors
+        .pull_down_en = GPIO_PULLDOWN_DISABLE, // Disable pull-down resistors
+        .intr_type = GPIO_INTR_DISABLE    // Disable interrupts for now
+    };
+    gpio_config(&io_conf);
+}
 
 void app_main(void)
 {
@@ -77,6 +96,7 @@ void app_main(void)
     io_config.pull_down_en = 0;
     io_config.pull_up_en = 0;
     gpio_config(&io_config);
+    configure_gpio_pins();
 
     //ADC initialize
     esp_err_t ret;
@@ -116,34 +136,46 @@ void app_main(void)
             past_samples[delay_index] = data;
             delay_index = (delay_index + 1) % DELAY_BUFFER_SIZE;
             uint32_t data_out = data;
+            uint32_t prev_index = 0;
 
             //  Process audio data
-            
+            uint8_t effect_selected = 3;
             // Reverb
-            // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
-            // echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
-            // data_out = echo_buffer[delay_index]/2;
+            if (gpio_get_level(REVERB_BUTTON) == 0) {
+                prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
+                echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
+                data_out = echo_buffer[delay_index]/2;
+            }
+            
+            if (gpio_get_level(ECHO_BUTTON) == 0) {
+                prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : (delay_index + 1);
+                echo_buffer[delay_index] = (uint32_t)(past_samples[delay_index-1] + (uint32_t)(0.75 * echo_buffer[prev_index]));
+                data_out = echo_buffer[delay_index]/2;
+            }
 
-            // Echo
-            uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : (delay_index + 1);
-            echo_buffer[delay_index] = (uint32_t)(past_samples[delay_index-1] + (uint32_t)(0.75 * echo_buffer[prev_index]));
-            data_out = echo_buffer[delay_index]/2;
+            if (gpio_get_level(DISTORTION_BUTTON) == 0) {
+                data_out *= 2;
+            }
 
-            // Distortion
-            // data_out *= 2;
+            if (gpio_get_level(TREMOLO_BUTTON) == 0) {
+                float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
+                data_out *= lfo_value;
+                tremolo_phase += TREMOLO_INCREMENT;
+                if (tremolo_phase >= 2 * M_PI) {
+                    tremolo_phase -= 2 * M_PI;
+                }
+            }
 
-            // Tremolo
-            // float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
-            // data_out *= lfo_value;
-            // tremolo_phase += TREMOLO_INCREMENT;
-            // if (tremolo_phase >= 2 * M_PI) {
-            //     tremolo_phase -= 2 * M_PI;
-            // }
-
+            if (gpio_get_level(RECTIFIED_TREMOLO) == 0) {
+                if (data_out < 1000) {
+                    data_out = 1000 + (1000 - data_out);
+                } 
+            }
             // Downsample
             // if (delay_index % 2 == 0) {
             //     data_out = past_samples[delay_index - 1];
             // }
+
 
 
 
