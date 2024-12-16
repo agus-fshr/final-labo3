@@ -19,20 +19,33 @@
 #include <math.h>
 
 /********************** macros and definitions *******************************/
-#define UPDATE_PERIOD_MICROSECONDS 100  //[T]=usec
+#define UPDATE_PERIOD_MICROSECONDS 50  //[T]=usec
 #define UPDATE_SAMPLE_FRECUENCY 1000000.0/UPDATE_PERIOD_MICROSECONDS  //[Fs]= Hz
 #define N  (int) ((UPDATE_SAMPLE_FRECUENCY)/DOn1)
 
 
 #define DAC_CHANNEL DAC_CHAN_0
+#define BUTTON_EFFECT_1 GPIO_NUM_16
+#define BUTTON_EFFECT_2 GPIO_NUM_17
+#define BUTTON_EFFECT_3 GPIO_NUM_18
+#define BUTTON_EFFECT_4 GPIO_NUM_19
+#define BUTTON_EFFECT_5 GPIO_NUM_22
 
 // Echo defines
-#define DELAY_BUFFER_SIZE 9000 * 2
+#define DELAY_BUFFER_SIZE 20000
+#define FIXED_DECIMAL_ONE 1000
+#define FIXED_DECIMAL(x) ( (int)((x) *  FIXED_DECIMAL_ONE) )
+#define MIX(v1, v2, beta) ( ((v1) * beta + (FIXED_DECIMAL_ONE - beta) * (v2)) / FIXED_DECIMAL_ONE)
+#define ECHO_FEEDBACK  FIXED_DECIMAL(0.5)
+#define HISTORY_LENGTH (1<<14)
+#define HISTORY_MASK (HISTORY_LENGTH - 1)
 
 // Tremolo defines
-#define SAMPLE_RATE 9000
+#define SAMPLE_RATE 22000
 #define TREMOLO_FREQUENCY 5
 #define TREMOLO_INCREMENT 2 * M_PI * TREMOLO_FREQUENCY / SAMPLE_RATE
+
+
 
 /********************** internal data declaration ****************************/
 
@@ -46,7 +59,8 @@
 /********************** external functions definition ************************/
 
 // Echo
-static uint32_t delay_buffer[DELAY_BUFFER_SIZE] = {0};
+static uint32_t echo_buffer[DELAY_BUFFER_SIZE] = {0};
+static uint32_t past_samples[DELAY_BUFFER_SIZE] = {0};
 static int delay_index = 0;
 
 // Tremolo
@@ -94,20 +108,29 @@ void app_main(void)
     {
         gpio_set_level(GPIO_NUM_32, 1);
         ret = adc_continuous_read(handle, result, EXAMPLE_READ_LEN, &ret_num, 0);
+        gpio_set_level(GPIO_NUM_32, 0);
         if (ret == ESP_OK) {
             adc_digi_output_data_t *p = (adc_digi_output_data_t*)&result[i];
             uint32_t data = EXAMPLE_ADC_GET_DATA(p);
-            delay_buffer[delay_index] = data;
+            // echo_buffer[delay_index] = data;
+            past_samples[delay_index] = data;
             delay_index = (delay_index + 1) % DELAY_BUFFER_SIZE;
             uint32_t data_out = data;
-            
+
             //  Process audio data
             
+            // Reverb
+            // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
+            // echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
+            // data_out = echo_buffer[delay_index]/2;
+
             // Echo
-            // data_out = (uint32_t)(data + (uint32_t)(delay_buffer[delay_index-1]))/2;
+            uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : (delay_index + 1);
+            echo_buffer[delay_index] = (uint32_t)(past_samples[delay_index-1] + (uint32_t)(0.75 * echo_buffer[prev_index]));
+            data_out = echo_buffer[delay_index]/2;
 
             // Distortion
-            data_out *= 2;
+            // data_out *= 2;
 
             // Tremolo
             // float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
@@ -117,11 +140,17 @@ void app_main(void)
             //     tremolo_phase -= 2 * M_PI;
             // }
 
+            // Downsample
+            // if (delay_index % 2 == 0) {
+            //     data_out = past_samples[delay_index - 1];
+            // }
+
 
 
             gpio_set_level(GPIO_NUM_33, 1);
             gpio_set_level(GPIO_NUM_33, 0);
             while ((esp_timer_get_time() - current_time) < (UPDATE_PERIOD_MICROSECONDS));
+            // vTaskDelay(pdMS_TO_TICKS(UPDATE_PERIOD_MICROSECONDS / 1000));
             dac_output_voltage(DAC_CHANNEL, (int) (data_out >>4 & 0x000000FF));
             // int scaled_value = data_out / 1.5;
             // dac_output_voltage(DAC_CHANNEL, scaled_value);
@@ -130,7 +159,6 @@ void app_main(void)
             //We try to read `EXAMPLE_READ_LEN` until API returns timeout, which means there's no available data
             break;
         }
-        gpio_set_level(GPIO_NUM_32, 0);
     }
 
     ESP_ERROR_CHECK(adc_continuous_stop(handle));
