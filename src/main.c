@@ -17,6 +17,7 @@
 #include "esp_adc/adc_continuous.h"
 #include "ADC_continuous.h"
 #include <math.h>
+#include "buffer.h"
 
 /********************** macros and definitions *******************************/
 #define UPDATE_PERIOD_MICROSECONDS 50  //[T]=usec
@@ -45,8 +46,6 @@
 #define TREMOLO_FREQUENCY 5
 #define TREMOLO_INCREMENT 2 * M_PI * TREMOLO_FREQUENCY / SAMPLE_RATE
 
-
-
 /********************** internal data declaration ****************************/
 
 /********************** internal functions declaration ***********************/
@@ -66,6 +65,7 @@ static int delay_index = 0;
 // Tremolo
 float tremolo_phase = 0.0;
 
+CircularBuffer_t *circular_buffer = NULL;
 
 void app_main(void)
 {
@@ -103,6 +103,12 @@ void app_main(void)
     uint64_t current_time = 0;
     int i =0;
 
+    circular_buffer = circular_buffer_init(SAMPLE_RATE + 100UL);
+    // llenar el buffer hasta el delay deseado
+    for (i = 0; i < ((SAMPLE_RATE*180UL)/1000UL); i++) {
+        circular_buffer_push(circular_buffer, 0);
+    }
+
 
     while (1) 
     {
@@ -111,34 +117,44 @@ void app_main(void)
         gpio_set_level(GPIO_NUM_32, 0);
         if (ret == ESP_OK) {
             adc_digi_output_data_t *p = (adc_digi_output_data_t*)&result[i];
-            uint32_t data = EXAMPLE_ADC_GET_DATA(p);
+            long data = EXAMPLE_ADC_GET_DATA(p);
+            data -= 2047;
             // echo_buffer[delay_index] = data;
             past_samples[delay_index] = data;
             delay_index = (delay_index + 1) % DELAY_BUFFER_SIZE;
-            uint32_t data_out = data;
+            long data_out = data;
 
             //  Process audio data
             
             // Reverb
-            // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
-            // echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
+            circular_buffer_push(circular_buffer, data);
+            long old = circular_buffer_pop(circular_buffer);
+            // circular_buffer_push(circular_buffer, (data + 0.75 * old) / 2);
+            // echo_buffer[delay_index] = (data + 0.75 * echo_buffer[prev_index]);
             // data_out = echo_buffer[delay_index]/2;
+            // data_out = (data + 0.75 * old) / 2;
+            data_out = (data + 0.75 * old) / 2;
+            // data_out = 0;
 
             // Echo
             // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : ((delay_index + 1) % (DELAY_BUFFER_SIZE / 2));
             // echo_buffer[delay_index] = (uint32_t)(past_samples[delay_index-1] + (uint32_t)(0.75 * echo_buffer[prev_index]));
             // data_out = echo_buffer[delay_index]/2;
 
-            // Distortion
+            // The two-time
             // data_out *= 2;
 
+            // Clipping
+            // if (data_out > 200) {data_out = 200;}
+            // if (data_out < -200) {data_out = -200;}
+
             // Tremolo
-            float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
-            data_out *= lfo_value;
-            tremolo_phase += TREMOLO_INCREMENT;
-            if (tremolo_phase >= 2 * M_PI) {
-                tremolo_phase -= 2 * M_PI;
-            }
+            // float lfo_value = (sin(tremolo_phase) + 1.0) / 2.1 + 0.1;
+            // data_out *= lfo_value;
+            // tremolo_phase += TREMOLO_INCREMENT;
+            // if (tremolo_phase >= 2 * M_PI) {
+            //     tremolo_phase -= 2 * M_PI;
+            // }
 
             // Downsample
             // if (delay_index % 2 == 0) {
@@ -146,9 +162,9 @@ void app_main(void)
             // }
 
             // Bitcrusher
-            if (data_out < 1000) {
-                data_out = 1000 + (1000 - data_out);
-            } 
+            // if (data_out < 1000) {
+            //     data_out = 1000 + (1000 - data_out);
+            // } 
             
             // Downsample
             // if (delay_index % 2 == 0) {
@@ -161,14 +177,23 @@ void app_main(void)
             gpio_set_level(GPIO_NUM_33, 0);
             while ((esp_timer_get_time() - current_time) < (UPDATE_PERIOD_MICROSECONDS));
             // vTaskDelay(pdMS_TO_TICKS(UPDATE_PERIOD_MICROSECONDS / 1000));
-            // dac_output_voltage(DAC_CHANNEL, (int) (data_out >>4 & 0x000000FF));
+            data_out += 2047;
+            // clip data out
+            if (data_out > 4095) {
+                data_out = 4090;
+            } else if (data_out < 0) {
+                data_out = 10;
+            }
             int scaled_value = data_out / 255 * 3;
-            dac_output_voltage(DAC_CHANNEL, scaled_value);
+            dac_output_voltage(DAC_CHANNEL, (uint8_t) (data_out >>4 & 0x000000FF));
             current_time = esp_timer_get_time(); // Obtiene el tiempo actual en microsegundos
         } else if (ret == ESP_ERR_TIMEOUT) {
             //We try to read `EXAMPLE_READ_LEN` until API returns timeout, which means there's no available data
             break;
         }
+        
+        // Feed esp watchdog
+        // esp_wdt
     }
 
     ESP_ERROR_CHECK(adc_continuous_stop(handle));
