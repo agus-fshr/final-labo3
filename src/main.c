@@ -120,14 +120,14 @@ void app_main(void)
             //  Process audio data
             
             // Reverb
-            // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
-            // echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
-            // data_out = echo_buffer[delay_index]/2;
+            uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE) ? (0) : (delay_index + 1);
+            echo_buffer[delay_index] = (uint32_t)(data + (uint32_t)(0.75 * echo_buffer[prev_index]));
+            data_out = echo_buffer[delay_index]/2;
 
             // Echo
-            uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : (delay_index + 1);
-            echo_buffer[delay_index] = (uint32_t)(past_samples[delay_index-1] + (uint32_t)(0.75 * echo_buffer[prev_index]));
-            data_out = echo_buffer[delay_index]/2;
+            // uint32_t prev_index = (delay_index == DELAY_BUFFER_SIZE / 2) ? (0) : ((delay_index + 1) % (DELAY_BUFFER_SIZE / 2));
+            // echo_buffer[delay_index] = (uint32_t)(past_samples[delay_index-1] + (uint32_t)(0.75 * echo_buffer[prev_index]));
+            // data_out = echo_buffer[delay_index]/2;
 
             // Distortion
             // data_out *= 2;
@@ -140,6 +140,16 @@ void app_main(void)
             //     tremolo_phase -= 2 * M_PI;
             // }
 
+            // Downsample
+            // if (delay_index % 2 == 0) {
+            //     data_out = past_samples[delay_index - 1];
+            // }
+
+            // Bitcrusher
+            // if (data_out < 1000) {
+            //     data_out = 1000 + (1000 - data_out);
+            // } 
+            
             // Downsample
             // if (delay_index % 2 == 0) {
             //     data_out = past_samples[delay_index - 1];
